@@ -1,8 +1,13 @@
 from flask import Flask
 from flask import request
+from flask_cors import CORS
 import json
 import random
+import uuid
+
+
 app = Flask(__name__)
+CORS(app)
 
 
 USER_ID = "1"
@@ -25,22 +30,37 @@ meals = [{
 }]
 
 
+def promotion():
+    promotion_number = random.randint(0, 2)
+    promotion_file = open("promotions.json", "r", encoding='CP1251')
+    promotions = json.loads(promotion_file.read())
+    return json.dumps(promotions[promotion_number], ensure_ascii=False)
+
+
+def read_file(filename):
+    opened_file = open(filename, 'r')
+    config_content = opened_file.read()
+    data = json.loads(config_content)
+    opened_file.close()
+    return data
+
+
+def write_file(filename, data):
+    opened_file = open(filename, 'w')
+    opened_file.write(json.dumps(data))
+    opened_file.close()
+
+
 @app.route("/alive")
 def alive():
-    config_file = open('config.json', 'r')
-    config_content = config_file.read()
-    data = json.loads(config_content)
-    config_file.close()
+    data = read_file('config.json')
 
     return json.dumps({"alive": data['alive']})
 
 
 @app.route("/workhours")
 def work():
-    config_file = open('config.json', 'r')
-    config_content = config_file.read()
-    data = json.loads(config_content)
-    config_file.close()
+    data = read_file('config.json')
 
     return json.dumps(data['workhours'])
 
@@ -48,29 +68,23 @@ def work():
 @app.route("/promotion")
 def promotion():
     promotion_number = random.randint(0, 2)
-    promotion_file = open("promotions.json", "r")
-    promotions = json.loads(promotion_file.read())
+    promotions = read_file('promotions.json')
 
-    return json.dumps(promotions[promotion_number])
+    print(json.dumps(promotions[promotion_number], ensure_ascii=False))
+    return json.dumps(promotions[promotion_number], ensure_ascii=False)
 
 
 @app.route("/promo/<code>")
 def promo(code):
-    promos_file = open('promo.json', 'r')
-    promocodes = json.loads(promos_file.read())
+    promocodes = read_file('promo.json')
 
     for promocode in promocodes:
         if promocode["code"] == code:
-
-            users_file_r = open('users.json', 'r')
-            users_data = json.loads(users_file_r.read())
-            users_file_r.close()
+            users_data = read_file("users.json")
 
             users_data[USER_ID]["promocode"] = code
 
-            users_file_w = open('users.json', 'w')
-            users_file_w.write(json.dumps(users_data))
-            users_file_w.close()
+            write_file('users.json', users_data)
 
             return json.dumps({"valid": True, "discount": promocode['discount']})
     return json.dumps({"valid": False})
@@ -83,27 +97,113 @@ def pp():
 
 @app.route("/meals")
 def meals_route():
-    users_file_r = open('users.json', 'r')
-    users_data = json.loads(users_file_r.read())
-    users_file_r.close()
+    users_data = read_file('users.json')
 
     discount = 0
 
     promocode = users_data[USER_ID]["promocode"]
 
+    meals_copy = json.loads(json.dumps(meals))
+
     if promocode != None:
-        promos_file = open('promo.json', 'r')
-        promocodes = json.loads(promos_file.read())
-        promos_file.close()
+        promocodes = read_file('promo.json')
 
         for p in promocodes:
             if p['code'] == promocode:
                 discount = p['discount']
 
-        for meal in meals:
+        for meal in meals_copy:
             meal['price'] = (1.0-discount/100) * meal['price']
 
     return json.dumps(meals)
 
 
-app.run('0.0.0.0', 8000)
+"""
+  "id1": {
+    "id": "id1",
+    "meals": [1],
+    "summ": 12,
+    "status": "canceled",
+    "user_id": "1"
+  }
+"""
+
+
+@app.route("/orders", methods=["GET", "POST"])
+def orders():
+    """
+    POST /orders -> { meals: [...] }
+    :return:
+    """
+    if request.method == 'GET':
+        orders_data = read_file("orders.json")
+        user_orders = []
+        for order_id in orders_data:
+            if orders_data[order_id]['user_id'] == USER_ID:
+                user_orders.append(orders_data[order_id])
+        return json.dumps(user_orders)
+    elif request.method == 'POST':
+        raw_data = request.data.decode("utf-8")
+        data = json.loads(raw_data)
+
+
+        discount = 0
+        users_data = read_file('users.json')
+        promocode = users_data[USER_ID]["promocode"]
+        if promocode != None:
+            promocodes = read_file('promo.json')
+            for p in promocodes:
+                if p['code'] == promocode:
+                    discount = p['discount']
+
+
+        summ = 0
+        meals_copy = json.loads(json.dumps(meals))
+        for meal in meals_copy:
+            meal_id = meal['id']
+            for user_meal_id in data['meals']:
+                if user_meal_id == meal_id:
+                    summ = summ + meal['price'] * (1.0-discount/100)
+                    break
+
+        new_order_id = str(uuid.uuid4())
+        new_order = {
+            "id": new_order_id,
+            "meals": data['meals'],
+            'summ': summ,
+            "status": "accepted",
+            "user_id": USER_ID
+        }
+
+        order_data = read_file("orders.json")
+        order_data[new_order_id] = new_order
+        write_file('orders.json', order_data)
+
+        return json.dumps({'order_id': new_order_id, "status": new_order['status']})
+
+
+@app.route("/activeorder")
+def actoveorder():
+    orders_data = read_file("orders.json")
+    user_orders = []
+    for order_id in orders_data:
+        order = orders_data[order_id]
+        if order['user_id'] == USER_ID and order['status'] == 'accepted':
+            return json.dumps(order)
+    return "", 404
+
+
+@app.route("/orders/<order_id>", methods=["DELETE"])
+def one_order(order_id):
+    orders_data = read_file("orders.json")
+    for saved_order_id in orders_data:
+        order = orders_data[saved_order_id]
+        if saved_order_id == order_id and order['user_id'] == USER_ID:
+            orders_data[saved_order_id]['status'] = 'cancelled'
+            write_file('orders.json', orders_data)
+            return json.dumps({'order_id': order_id, "status": "cancelled"})
+    return "", 404
+
+
+
+app.run('0.0.0.0', 8090)
