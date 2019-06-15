@@ -1,7 +1,10 @@
 import json
 import os
+import random
 import sqlite3
+import urllib
 
+import requests
 from flask import Flask
 
 app = Flask(__name__)
@@ -20,7 +23,7 @@ def init_db():
     c = get_cursor()
     c.execute("""
     CREATE TABLE IF NOT EXISTS meals (
-        id integer PRIMARY KEY,
+        id integer PRIMARY KEY AUTOINCREMENT NOT NULL,
         title text,
         available integer,
         picture text,
@@ -62,6 +65,33 @@ def init_db():
     INSERT INTO users VALUES (1, null)
     """)
     c.connection.commit()
+    c.connection.close()
+
+
+def fill_database():
+    """
+    See https://www.food2fork.com/
+    :return:
+    """
+    api_key = "f96f947346e0439bf62117e1c291e685"
+    key_words = "cake"
+    c = get_cursor()
+    for page in range(1, 2):
+        params = urllib.parse.urlencode({'key': api_key, 'q': key_words, 'page': page})
+        url_string = "https://www.food2fork.com/api/search?" + params
+        r = requests.get(url_string)
+        data = r.json()
+        for recipe in data['recipes']:
+            c.execute("""
+            INSERT INTO meals (title, available, picture, price, category) VALUES (?, ?, ?, ?, ?)
+            """, [
+                recipe['title'],
+                1,
+                recipe['image_url'],
+                recipe['social_rank'] + random.randint(0, 100),
+                1
+            ])
+            c.connection.commit()
     c.connection.close()
 
 
@@ -120,7 +150,10 @@ def meals():
         })
     return json.dumps(meals)
 
+
 if not os.path.exists("database.db"):
     init_db()
+    fill_database()
+
 
 app.run('0.0.0.0', 8000)
