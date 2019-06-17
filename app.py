@@ -1,12 +1,16 @@
 import os
 import sqlite3
+import urllib
 
+import requests
 from flask import Flask
 from flask import request
 from flask_cors import CORS
 import json
 import random
 import uuid
+
+from twilio.rest import Client
 
 
 app = Flask(__name__)
@@ -43,7 +47,7 @@ def init_db():
     c = get_cursor()
     c.execute("""
     CREATE TABLE IF NOT EXISTS meals (
-        id integer PRIMARY KEY,
+        id integer PRIMARY KEY AUTOINCREMENT NOT NULL,
         title text,
         available integer,
         picture text,
@@ -68,14 +72,6 @@ def init_db():
     """)
 
     c.execute("""
-    INSERT INTO meals VALUES (1, "Chicken", 1, "", 20.0, 1)
-    """)
-
-    c.execute("""
-    INSERT INTO meals VALUES (2, "Milk", 1, "", 10.0, 1)
-    """)
-
-    c.execute("""
     INSERT INTO promocodes VALUES (1, "stepik", 30.0)
     """)
     c.execute("""
@@ -86,6 +82,30 @@ def init_db():
     INSERT INTO users VALUES (1, null)
     """)
     c.connection.commit()
+    c.connection.close()
+
+
+def fill_database():
+    api_key = "f96f947346e0439bf62117e1c291e685"
+    key_words = "cake"
+    c = get_cursor()
+
+    for page in range(1, 4):
+        params = {"key": api_key, 'q': key_words, 'page': page}
+        url_string = "https://www.food2fork.com/api/search?" + urllib.parse.urlencode(params)
+        r = requests.get(url_string)
+        data = r.json()
+        for item in data['recipes']:
+            c.execute("""
+            INSERT INTO meals (title, available, picture, price, category) VALUES (?, ?, ?, ?, ?)
+            """, [
+                item['title'],
+                1,
+                item['image_url'],
+                item['social_rank'] + random.randint(0, 100),
+                1
+            ])
+            c.connection.commit()
     c.connection.close()
 
 
@@ -294,6 +314,22 @@ def orders():
         return json.dumps({'order_id': new_order_id, "status": new_order['status']})
 
 
+@app.route("/notification")
+def notif():
+    sms_client = Client(
+        "AC3702cc3f63fed23e1b571eb911e83d6f",
+        "cd19e24a44f92f2f4d3823ea6424b29c"
+    )
+
+    message = sms_client.messages.create(
+        body="New order is accepted!",
+        from_="+12053509383",
+        to=""
+    )
+
+    return json.dumps({"status": True})
+
+
 @app.route("/activeorder")
 def actoveorder():
     orders_data = read_file("orders.json")
@@ -319,6 +355,7 @@ def one_order(order_id):
 
 if not os.path.exists("database.db"):
     init_db()
+    fill_database()
 
 
 app.run('0.0.0.0', 8090)
