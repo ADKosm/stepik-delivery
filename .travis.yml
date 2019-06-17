@@ -1,0 +1,7 @@
+language: python
+env:
+  global:
+  - REMOTEUSER=root
+  - USERPASS=qwert1234
+  - REMOTEHOST=178.62.2.141
+script: fab deploy
