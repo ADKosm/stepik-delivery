@@ -1,3 +1,6 @@
+import os
+import sqlite3
+
 from flask import Flask
 from flask import request
 from flask_cors import CORS
@@ -28,6 +31,62 @@ meals = [{
  "price": 10.0,
  "category": 1
 }]
+
+
+def get_cursor():
+    connection = sqlite3.connect("database.db")
+    c = connection.cursor()
+    return c
+
+
+def init_db():
+    c = get_cursor()
+    c.execute("""
+    CREATE TABLE IF NOT EXISTS meals (
+        id integer PRIMARY KEY,
+        title text,
+        available integer,
+        picture text,
+        price real,
+        category integer
+    )
+    """)
+
+    c.execute("""
+    CREATE TABLE IF NOT EXISTS promocodes (
+        id integer PRIMARY KEY,
+        code text,
+        discount real
+    )
+    """)
+
+    c.execute("""
+    CREATE TABLE IF NOT EXISTS users (
+        id integer PRIMARY KEY,
+        promocode text
+    )
+    """)
+
+    c.execute("""
+    INSERT INTO meals VALUES (1, "Chicken", 1, "", 20.0, 1)
+    """)
+
+    c.execute("""
+    INSERT INTO meals VALUES (2, "Milk", 1, "", 10.0, 1)
+    """)
+
+    c.execute("""
+    INSERT INTO promocodes VALUES (1, "stepik", 30.0)
+    """)
+    c.execute("""
+    INSERT INTO promocodes VALUES (2, "delivery", 10.0)
+    """)
+
+    c.execute("""
+    INSERT INTO users VALUES (1, null)
+    """)
+    c.connection.commit()
+    c.connection.close()
 
 
 def promotion():
@@ -74,20 +133,41 @@ def promotion():
     return json.dumps(promotions[promotion_number], ensure_ascii=False)
 
 
+# @app.route("/promo/<code>")
+# def promo(code):
+#     promocodes = read_file('promo.json')
+#
+#     for promocode in promocodes:
+#         if promocode["code"] == code:
+#             users_data = read_file("users.json")
+#
+#             users_data[USER_ID]["promocode"] = code
+#
+#             write_file('users.json', users_data)
+#
+#             return json.dumps({"valid": True, "discount": promocode['discount']})
+#     return json.dumps({"valid": False})
+
+
 @app.route("/promo/<code>")
 def promo(code):
-    promocodes = read_file('promo.json')
+    c = get_cursor()
+    c.execute("""
+    SELECT * FROM promocodes WHERE code = ?
+    """, [code])
+    result = c.fetchone()
+    if result is None:
+        return json.dumps({'valid': False})
 
-    for promocode in promocodes:
-        if promocode["code"] == code:
-            users_data = read_file("users.json")
-
-            users_data[USER_ID]["promocode"] = code
-
-            write_file('users.json', users_data)
-
-            return json.dumps({"valid": True, "discount": promocode['discount']})
-    return json.dumps({"valid": False})
+    promo_id, promo_code, promo_discount = result
+    c.execute("""
+    UPDATE users
+    SET promocode = ?
+    WHERE id = ?
+    """, (promo_code, int(USER_ID)))
+    c.connection.commit()
+    c.connection.close()
+    return json.dumps({"valid": True, "discount": promo_discount})
 
 
 @app.route("/ppoosstt", methods=["GET", "POST", "BIB"])
@@ -95,26 +175,58 @@ def pp():
     return request.method
 
 
+# @app.route("/meals")
+# def meals_route():
+#     users_data = read_file('users.json')
+#
+#     discount = 0
+#
+#     promocode = users_data[USER_ID]["promocode"]
+#
+#     meals_copy = json.loads(json.dumps(meals))
+#
+#     if promocode != None:
+#         promocodes = read_file('promo.json')
+#
+#         for p in promocodes:
+#             if p['code'] == promocode:
+#                 discount = p['discount']
+#
+#         for meal in meals_copy:
+#             meal['price'] = (1.0-discount/100) * meal['price']
+#
+#     return json.dumps(meals)
+
 @app.route("/meals")
 def meals_route():
-    users_data = read_file('users.json')
+    c = get_cursor()
+
+    c.execute("""
+    SELECT discount
+    FROM promocodes
+    WHERE code = (
+        SELECT promocode
+        FROM users
+        WHERE id = ?
+    )
+    """, (int(USER_ID),))
+    result = c.fetchone()
 
     discount = 0
+    if result is not None:
+        discount = result[0]
 
-    promocode = users_data[USER_ID]["promocode"]
-
-    meals_copy = json.loads(json.dumps(meals))
-
-    if promocode != None:
-        promocodes = read_file('promo.json')
-
-        for p in promocodes:
-            if p['code'] == promocode:
-                discount = p['discount']
-
-        for meal in meals_copy:
-            meal['price'] = (1.0-discount/100) * meal['price']
-
+    meals = []
+    for meals_info in c.execute("SELECT * FROM meals"):
+        meals_id, title, available, picture, price, category = meals_info
+        meals.append({
+            'id': meals_id,
+            'title': title,
+            'available': bool(available),
+            'picture': picture,
+            'price': price * (1.0 - discount/100),
+            'category': category
+        })
     return json.dumps(meals)
 
 
@@ -204,6 +316,9 @@ def one_order(order_id):
             return json.dumps({'order_id': order_id, "status": "cancelled"})
     return "", 404
 
+
+if not os.path.exists("database.db"):
+    init_db()
 
 
 app.run('0.0.0.0', 8090)
