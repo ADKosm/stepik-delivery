@@ -10,8 +10,6 @@ import json
 import random
 import uuid
 
-from twilio.rest import Client
-
 
 app = Flask(__name__)
 CORS(app)
@@ -314,22 +312,6 @@ def orders():
         return json.dumps({'order_id': new_order_id, "status": new_order['status']})
 
 
-@app.route("/notification")
-def notif():
-    sms_client = Client(
-        "AC3702cc3f63fed23e1b571eb911e83d6f",
-        "cd19e24a44f92f2f4d3823ea6424b29c"
-    )
-
-    message = sms_client.messages.create(
-        body="New order is accepted!",
-        from_="+12053509383",
-        to=""
-    )
-
-    return json.dumps({"status": True})
-
-
 @app.route("/activeorder")
 def actoveorder():
     orders_data = read_file("orders.json")
@@ -358,4 +340,4 @@ if not os.path.exists("database.db"):
     fill_database()
 
 
-app.run('0.0.0.0', 8090)
+app.run('0.0.0.0', 9000)

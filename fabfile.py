@@ -1,6 +1,5 @@
 import os
 
-from patchwork import files
 from fabric import Connection, Config, task
 
 
@@ -17,13 +16,13 @@ def deploy(c):
 
     print("Copy sources")
     conn.put("app.py")
+    conn.put("config.json")
 
     print("Install requirements")
     conn.sudo("pip3 install Flask Flask-CORS")
 
-    if files.exists(conn, "/root/server.pid"):
-        print("Shutdown previous server")
-        conn.sudo("pkill -F server.pid")
+    print("Shutdown previous server")
+    conn.sudo("pkill -F server.pid", warn=True)
 
     print("Run server")
     conn.sudo("nohup python3 app.py &> logs.txt & echo $! > server.pid")
